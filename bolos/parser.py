@@ -2,23 +2,23 @@
 To make the code re-usabe in other projects it is independent from the rest of
 the BOLOS code.
 
-Most user would only use the method :func:`parse` in this module, which is 
+Most user would only use the method :func:`parse` in this module, which is
 documented below.
-    
+
 """
 
-import sys
 import re
-import numpy as np
 import logging
+from typing import List, Dict, Callable, TextIO
+import numpy as np
 
 
-def parse(fp):
-    """ Parses a BOLSIG+ cross-sections file.  
+def parse(fp: TextIO) -> List[Dict]:
+    """ Parses a BOLSIG+ cross-sections file.
 
     Parameters
     ----------
-    fp : file-like
+    fp : TextIO
        A file object pointing to a Bolsig+-compatible cross-sections file.
 
     Returns
@@ -40,26 +40,28 @@ def parse(fp):
     for line in fp:
         try:
             key = line.strip()
-            fread = KEYWORDS[key]
+            fread: Callable[[TextIO], Dict] = KEYWORDS[key]
 
             # If the key is not found, we do not reach this line.
-            logging.debug("New process of type '%s'" % key)
+            logging.debug("New process of type '%s'", key)
 
             d = fread(fp)
             d['kind'] = key
             processes.append(d)
-            
+
         except KeyError:
             pass
 
-    logging.info("Parsing complete. %d processes read." % len(processes))
+    logging.info("Parsing complete. %d processes read.", len(processes))
 
     return processes
 
 
 # BOLSIG+'s user guide saye that the separators must consist of at least five dashes
 RE_SEP = re.compile("-----+")
-def _read_until_sep(fp):
+
+
+def _read_until_sep(fp: TextIO):
     """ Reads lines from fp until a we find a separator line. """
     lines = []
     for line in fp:
@@ -70,18 +72,18 @@ def _read_until_sep(fp):
     return lines
 
 
-def _read_block(fp, has_arg=True):
-    """ Reads data of a process, contained in a block. 
+def _read_block(fp: TextIO, has_arg: bool = True):
+    """ Reads data of a process, contained in a block.
     has_arg indicates wether we have to read an argument line"""
-    target = fp.next().strip()
+    target = next(fp).strip()
     if has_arg:
-        arg = fp.next().strip()
+        arg = next(fp).strip()
     else:
         arg = None
 
     comment = "\n".join(_read_until_sep(fp))
 
-    logging.debug("Read process '%s'" % target)
+    logging.debug("Read process '%s'", target)
     data = np.loadtxt(_read_until_sep(fp)).tolist()
 
     return target, arg, comment, data
@@ -89,8 +91,10 @@ def _read_block(fp, has_arg=True):
 #
 # Specialized funcion for each keyword. They all return dictionaries with the
 # relevant attibutes.
-# 
-def _read_momentum(fp):
+#
+
+
+def _read_momentum(fp: TextIO) -> Dict:
     """ Reads a MOMENTUM or EFFECTIVE block. """
     target, arg, comment, data = _read_block(fp, has_arg=True)
     mass_ratio = float(arg.split()[0])
@@ -101,8 +105,11 @@ def _read_momentum(fp):
 
     return d
 
-RE_ARROW = re.compile('<?->')    
-def _read_excitation(fp):
+
+RE_ARROW = re.compile('<?->')
+
+
+def _read_excitation(fp: TextIO) -> Dict:
     """ Reads an EXCITATION or IONIZATION block. """
     target, arg, comment, data = _read_block(fp, has_arg=True)
     lhs, rhs = [s.strip() for s in RE_ARROW.split(target)]
@@ -122,9 +129,9 @@ def _read_excitation(fp):
     return d
 
 
-def _read_attachment(fp):
+def _read_attachment(fp: TextIO) -> Dict:
     """ Reads an ATTACHMENT block. """
-    target, arg, comment, data = _read_block(fp, has_arg=False)
+    target, _, comment, data = _read_block(fp, has_arg=False)
 
     d = dict(comment=comment,
              data=data,
@@ -140,8 +147,8 @@ def _read_attachment(fp):
     return d
 
 
-KEYWORDS = {"MOMENTUM": _read_momentum, 
-            "ELASTIC": _read_momentum, 
+KEYWORDS = {"MOMENTUM": _read_momentum,
+            "ELASTIC": _read_momentum,
             "EFFECTIVE": _read_momentum,
             "EXCITATION": _read_excitation,
             "IONIZATION": _read_excitation,

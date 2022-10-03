@@ -1,11 +1,17 @@
-import logging
-
+from typing import Callable, Optional
 import numpy as np
 from scipy.interpolate import interp1d
 
+from bolos.grid import Grid
 
-class Process(object):
-    # The factor of in-scatering.  
+# To avoid circular import with typing
+from typing import TYPE_CHECKING  # pylint: disable=wrong-import-order
+if TYPE_CHECKING:
+    from bolos.target import Target
+
+
+class Process:
+    # The factor of in-scatering.
     IN_FACTOR = {'EXCITATION': 1,
                  'IONIZATION': 2,
                  'ATTACHMENT': 0,
@@ -13,7 +19,7 @@ class Process(object):
                  'MOMENTUM': 1,
                  'EFFECTIVE': 1}
 
-    # The shift factor for inelastic collisions. 
+    # The shift factor for inelastic collisions.
     SHIFT_FACTOR = {'EXCITATION': 1,
                     'IONIZATION': 2,
                     'ATTACHMENT': 1,
@@ -21,16 +27,28 @@ class Process(object):
                     'MOMENTUM': 1,
                     'EFFECTIVE': 1}
 
-                 
-    def __init__(self, target=None, kind=None, data=None,
-                 comment='', mass_ratio=None,
-                 product=None, threshold=0, weight_ratio=None):
-        self.target_name = target
+    def __init__(self,
+                 target: str,
+                 kind: str,
+                 data: Optional[np.ndarray] = None,
+                 comment: Optional[str] = None,
+                 mass_ratio: Optional[float] = None,
+                 product: Optional[str] = None,
+                 threshold: float = 0.0,
+                 weight_ratio=None) -> None:
 
+        self.target_name = target
         # We will link this later
-        self.target = None
+        self.target: Optional['Target'] = None
 
         self.kind = kind
+        if self.kind not in self.IN_FACTOR:
+            raise KeyError(
+                f"self.kind is {self.kind}, \
+                    but should be one of of the following: \
+                    'EXCITATION', 'IONIZATION', 'ATTACHMENT',\
+                    'ELASTIC', 'MOMENTUM', 'EFFECTIVE'")
+
         self.data = np.array(data)
 
         self.x = self.data[:, 0]
@@ -41,25 +59,28 @@ class Process(object):
         self.product = product
         self.threshold = threshold
         self.weight_ratio = weight_ratio
-        self.interp = padinterp(self.data)
+        self.interp: Callable = padinterp(self.data)
         self.isnull = False
 
-        
-        self.in_factor = self.IN_FACTOR.get(self.kind, None)
-        self.shift_factor = self.SHIFT_FACTOR.get(self.kind, None)
-        
+        self.in_factor = self.IN_FACTOR[self.kind]
+        self.shift_factor = self.SHIFT_FACTOR[self.kind]
+
         if np.amin(self.data[:, 0]) < 0:
-            raise ValueError("Negative energy in the cross section %s"
-                             % str(self))
- 
+            raise ValueError(
+                f"Negative energy in the cross section {str(self)}")
+
         if np.amin(self.data[:, 1]) < 0:
-            raise ValueError("Negative cross section for %s"
-                             % str(self))
-       
-        self.cached_grid = None
+            raise ValueError(f"Negative cross section for {str(self)}")
 
+        self.cached_grid: Optional[Grid] = None
 
-    def scatterings(self, g, eps):
+        # Defined later
+        self.j = np.zeros(0)
+        self.i = np.zeros(0)
+        self.sigma = np.zeros(0)
+        self.eps = np.zeros(0)
+
+    def scatterings(self, g: np.ndarray, eps: np.ndarray) -> np.ndarray:
         if len(self.j) == 0:
             # When we do not have inelastic collisions or when the grid is
             # smaller than the thresholds, we still return an empty array
@@ -68,21 +89,20 @@ class Process(object):
 
         gj = g[self.j]
         epsj = eps[self.j]
-        r = int_linexp0(self.eps[:, 0], self.eps[:, 1], 
+        r = int_linexp0(self.eps[:, 0], self.eps[:, 1],
                         self.sigma[:, 0], self.sigma[:, 1],
                         gj, epsj)
         return r
-        
-        
-    def set_grid_cache(self, grid):
+
+    def set_grid_cache(self, grid: Grid) -> None:
         """ Sets a grid cache of the intersections between grid cell j and grid
-        cell i shifted. 
+        cell i shifted.
         """
 
-        # We will create an arras with matching 
+        # We will create an arrays with matching
         # rows ([i], [j], [eps1, eps2], [sigma1, sigma2])
         # that contain the overlap between the shifted cell i and cell j.
-        # However we may have more than one row for a given i, j if 
+        # However we may have more than one row for a given i, j if
         # an interpolation point for sigma falls inside the interval.
 
         if self.cached_grid is grid:
@@ -94,49 +114,53 @@ class Process(object):
 
         eps1 = self.shift_factor * grid.b + self.threshold
         eps1[:] = np.maximum(eps1, grid.b[0] + 1e-9)
+        # TODO: error here? eps2 instead of eps1?
         eps1[:] = np.minimum(eps1, grid.b[-1] - 1e-9)
 
         fltb = np.logical_and(grid.b >= eps1[0], grid.b <= eps1[-1])
         fltx = np.logical_and(self.x >= eps1[0], self.x <= eps1[-1])
         nodes = np.unique(np.r_[eps1, grid.b[fltb], self.x[fltx]])
 
-
         sigma0 = self.interp(nodes)
-        
+
         self.j = np.searchsorted(grid.b, nodes[1:]) - 1
         self.i = np.searchsorted(eps1, nodes[1:]) - 1
         self.sigma = np.c_[sigma0[:-1], sigma0[1:]]
-        self.eps   = np.c_[nodes[:-1], nodes[1:]]
+        self.eps = np.c_[nodes[:-1], nodes[1:]]
 
-    def __str__(self):
-        return "{%s: %s %s}" % (self.kind, self.target_name, 
-                                "-> " + self.product if self.product else "")
+    def __str__(self) -> str:
+        return f"{self.kind}: {self.target_name} -> {self.product}"
 
 
 class NullProcess(Process):
-    """ This is a null process with a 0 cross section it is useful 
+    """ This is a null process with a 0 cross section it is useful
     when we reduce other processes. """
-    def __init__(self, target, kind):
-        self.data = np.empty((0, 2))
-        self.interp = lambda x: np.zeros_like(x)
+
+    def __init__(self, target: str, kind: str) -> None:
+        # self.data = np.empty((0, 2))
+
+        super().__init__(target=target,
+                         kind=kind,
+                         data=np.empty((0, 2)))
+
+        self.interp: Callable = np.zeros_like
         self.target_name = target
         self.kind = kind
         self.isnull = True
-
-        self.comment = None
-        self.mass_ratio = None
-        self.product = None
-        self.threshold = None
-        self.weight_ratio = None
-
         self.x = np.array([])
         self.y = np.array([])
 
-    def __str__(self):
+        # self.comment = None
+        # self.mass_ratio = None
+        # self.product = None
+        # self.threshold = None
+        # self.weight_ratio = None
+
+    def __str__(self) -> str:
         return "{NULL}"
 
 
-def padinterp(data):
+def padinterp(data: np.ndarray) -> Callable:
     """ Interpolates from data but adds elements at the beginning and end
     to extrapolate cross-sections. """
     if data[0, 0] > 0:
@@ -149,8 +173,13 @@ def padinterp(data):
     return interp1d(x, y, kind='linear')
 
 
-def int_linexp0(a, b, u0, u1, g, x0):
-    """ This is the integral in [a, b] of u(x) * exp(g * (x0 - x)) * x 
+def int_linexp0(a: np.ndarray,
+                b: np.ndarray,
+                u0: np.ndarray,
+                u1: np.ndarray,
+                g: np.ndarray,
+                x0: np.ndarray) -> np.ndarray:
+    """ This is the integral in [a, b] of u(x) * exp(g * (x0 - x)) * x
     assuming that
     u is linear with u({a, b}) = {u0, u1}."""
 
@@ -182,13 +211,13 @@ def int_linexp0(a, b, u0, u1, g, x0):
     # A1 = (  expa * ag1
     #        - expb * bg1) / g2
 
-    # A2 = (expa * (2 * ag1 + ag * ag) - 
+    # A2 = (expa * (2 * ag1 + ag * ag) -
     #       expb * (2 * bg1 + bg * bg)) / g3
 
-    A1 = (  expm1a * ag1 + ag
+    A1 = (expm1a * ag1 + ag
           - expm1b * bg1 - bg) / g2
 
-    A2 = (expm1a * (2 * ag1 + ag * ag) + ag * (ag + 2) - 
+    A2 = (expm1a * (2 * ag1 + ag * ag) + ag * (ag + 2) -
           expm1b * (2 * bg1 + bg * bg) - bg * (bg + 2)) / g3
 
     # The factors multiplying each coefficient can be obtained by
@@ -200,5 +229,3 @@ def int_linexp0(a, b, u0, u1, g, x0):
 
     # Where either F0 or F1 is 0 we return 0
     return np.where(np.isnan(r), 0.0, r)
-
-
