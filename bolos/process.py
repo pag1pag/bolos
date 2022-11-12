@@ -11,10 +11,10 @@ if TYPE_CHECKING:
 
 
 class Process:
-    # The factor of in-scatering.
-    IN_FACTOR = {'EXCITATION': 1,
-                 'IONIZATION': 2,
-                 'ATTACHMENT': 0,
+    # The factor of in-scattering.
+    IN_FACTOR = {'EXCITATION': 1,  # Eq. 28
+                 'IONIZATION': 2,  # Eq. 29 (create electron, equal sharing)
+                 'ATTACHMENT': 0,  # Eq. 30 (remove electron)
                  'ELASTIC': 1,
                  'MOMENTUM': 1,
                  'EFFECTIVE': 1}
@@ -35,7 +35,7 @@ class Process:
                  mass_ratio: Optional[float] = None,
                  product: Optional[str] = None,
                  threshold: float = 0.0,
-                 weight_ratio=None) -> None:
+                 weight_ratio: Optional[float]=None) -> None:
 
         self.target_name = target
         # We will link this later
@@ -81,6 +81,15 @@ class Process:
         self.eps = np.zeros(0)
 
     def scatterings(self, g: np.ndarray, eps: np.ndarray) -> np.ndarray:
+        """See Eq. 47 & Eq. 48
+
+        Args:
+            g (np.ndarray): _description_
+            eps (np.ndarray): _description_
+
+        Returns:
+            np.ndarray: _description_
+        """
         if len(self.j) == 0:
             # When we do not have inelastic collisions or when the grid is
             # smaller than the thresholds, we still return an empty array
@@ -112,14 +121,15 @@ class Process:
 
         self.cached_grid = grid
 
+        # self.threshold corresponds to `u_k` in Eq. 49
         eps1 = self.shift_factor * grid.b + self.threshold
+        # See Eq. 49
         eps1[:] = np.maximum(eps1, grid.b[0] + 1e-9)
-        # TODO: error here? eps2 instead of eps1?
         eps1[:] = np.minimum(eps1, grid.b[-1] - 1e-9)
 
-        fltb = np.logical_and(grid.b >= eps1[0], grid.b <= eps1[-1])
-        fltx = np.logical_and(self.x >= eps1[0], self.x <= eps1[-1])
-        nodes = np.unique(np.r_[eps1, grid.b[fltb], self.x[fltx]])
+        mask_b = np.logical_and(grid.b >= eps1[0], grid.b <= eps1[-1])
+        mask_x = np.logical_and(self.x >= eps1[0], self.x <= eps1[-1])
+        nodes = np.unique(np.r_[eps1, grid.b[mask_b], self.x[mask_x]])
 
         sigma0 = self.interp(nodes)
 

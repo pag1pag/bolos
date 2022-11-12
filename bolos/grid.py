@@ -1,6 +1,9 @@
-""" Routines to handle different kinds of grids (linear, quadratic, logarithmic)
 """
+Routines to handle different kinds of grids (linear, quadratic, logarithmic)
+"""
+
 from abc import ABC, abstractmethod
+from typing import Callable, Optional
 import numpy as np
 from scipy.interpolate import interp1d
 
@@ -44,6 +47,7 @@ class Grid(ABC):
         self.fx0 = self.f(self.x0)
         self.fx1 = self.f(self.x1)
 
+        # Number of cells
         self.n = n
 
         # Boundaries at i - 1/2
@@ -62,7 +66,7 @@ class Grid(ABC):
         # This is useful in some routines that integrate eps**1/2 * f
         self.d32 = self.b[1:]**1.5 - self.b[:-1]**1.5
 
-        self._interp = None
+        self._interp: Optional[Callable] = None
 
     def interpolate(self, f: np.ndarray, other: 'Grid') -> np.ndarray:
         """ Interpolates into this grid an eedf defined in another grid.
@@ -86,10 +90,6 @@ class Grid(ABC):
             self._interp = interp1d(np.r_[other.x0, other.c, other.x1],
                                     np.r_[f[0], f, f[-1]],
                                     bounds_error=False, fill_value=0)
-        # Mypy is a little bit broken here, so need the following line
-        if self._interp is None:
-            raise ValueError(
-                "There is an error in grid.py with the interpolation.")
         return self._interp(self.c)
 
     def cell(self, x: float) -> int:

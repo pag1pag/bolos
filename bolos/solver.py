@@ -26,11 +26,10 @@ import numpy as np
 # in eV.
 # The scipy.constants contains the recommended CODATA for all physical
 # constants in SI units.
-import scipy.constants as co
-from scipy import integrate
-from scipy import sparse
+from scipy import integrate, sparse
 from scipy.sparse import spmatrix
 from scipy.sparse.linalg import spsolve
+import scipy.constants as co
 
 from bolos.process import Process
 from bolos.target import Target
@@ -201,7 +200,7 @@ class BoltzmannSolver:
 
         self.target[species].density = density
 
-    def load_collisions(self, dict_processes: Dict) -> List[Process]:
+    def load_collisions(self, dict_processes: List[Dict]) -> List[Process]:
         """ Loads the set of collisions from the list of processes.
 
         Loads a list of dictionaries containing processes.
@@ -228,8 +227,8 @@ class BoltzmannSolver:
 
         # We make sure that all targets have their elastic cross-sections
         # in the form of ELASTIC cross sections (not EFFECTIVE / MOMENTUM)
-        for item in self.target.values():
-            item.ensure_elastic()
+        for target in self.target.values():
+            target.ensure_elastic()
 
         return plist
 
@@ -393,11 +392,11 @@ class BoltzmannSolver:
         An iterator over (target, process) tuples.
 
         """
-        for t, k in self.iter_elastic():
-            yield t, k
+        for target, process in self.iter_elastic():
+            yield target, process
 
-        for t, k in self.iter_inelastic():
-            yield t, k
+        for target, process in self.iter_inelastic():
+            yield target, process
 
     def iter_momentum(self) -> Iterator[Tuple[Target, Process]]:
         return self.iter_all()
@@ -441,20 +440,24 @@ class BoltzmannSolver:
                 raise ValueError(
                     f"Mass ratio for target `{target}` has not been set")
 
+            # Eq. 42
             self.sigma_eps += 2 * target.mass_ratio * s
+            # Eq. 7 (elastic term)
             self.sigma_m += s
             process.set_grid_cache(self.grid)
 
         for target, process in self.iter_inelastic():
+            # Eq. 7 (inelastic term)
             self.sigma_m += target.density * process.interp(self.benergy)
             process.set_grid_cache(self.grid)
 
+        # Eq. 40, first term
         self.W = -GAMMA * self.benergy**2 * self.sigma_eps
 
-        # This is the coeff of sigma_tilde
+        # This is the coeff of sigma_tilde (Eq. 41, first term)
         self.DA = (GAMMA / 3. * self.EN**2 * self.benergy)
 
-        # This is the independent term
+        # This is the independent term (Eq. 41, second term)
         self.DB = (GAMMA * self.kT * self.benergy**2 * self.sigma_eps)
 
         logging.info("Solver succesfully initialized/updated")
@@ -481,7 +484,6 @@ class BoltzmannSolver:
         -----
         This is often useful to give a starting value for the EEDF.
         """
-
         return (2 * np.sqrt(1 / np.pi) * kT**(-3./2.) * np.exp(-self.cenergy / kT))
 
     def iterate(self, f0: np.ndarray, delta: float = 1e14) -> np.ndarray:
@@ -507,12 +509,15 @@ class BoltzmannSolver:
         standard entry point for the iterative solution of the EEDF is
         the :func:`BoltzmannSolver.converge` method.
         """
-
+        # Matrix A corresponds to Eq. 45.
+        # Matrix Q corredponds to Eq. 46 (Q seems to be both P and Q)
         A, Q = self._linsystem(f0)
 
+        # Resolve the linear system formed by Eq. 45
         f1 = spsolve(sparse.eye(self.n)
                      + delta * A - delta * Q, f0)
 
+        # normalization condition
         return self._normalized(f1)
 
     def converge(self,
@@ -578,7 +583,6 @@ class BoltzmannSolver:
 
             f1 = self.iterate(f0, delta=delta)
             err0 = err1
-            # err1 = self._norm(abs(f0 - f1))
             err1 = self._norm(np.abs(f0 - f1))
 
             logging.debug(
@@ -597,16 +601,23 @@ class BoltzmannSolver:
         raise ConvergenceError()
 
     def _linsystem(self, F: np.ndarray) -> Tuple[spmatrix, spmatrix]:
+        # `Q` -> matrix corresponding to Eq. (48) minus Eq. (47)
+        # `Q` -> matrix corresponding to scattering-in - scattering-out
         Q = self._PQ(F)
 
         # Useful for debugging but wasteful in normal times.
         # if np.any(np.isnan(Q.todense())):
         #     raise ValueError("NaN found in Q")
 
+        # Should correspond to Eq. 10 (is it really? maybe it's nu/N?)
+        # TODO: explain this
         nu = np.sum(Q.dot(F))
 
+        # Eq. 12
         sigma_tilde = self.sigma_m + nu / np.sqrt(self.benergy) / GAMMA
 
+        # Should correspond to Eq. 15 (is it really?)
+        # TODO: explain this
         # The R (G) term, which we add to A.
         G = 2 * self.denergy32 * nu / 3
 
@@ -618,6 +629,7 @@ class BoltzmannSolver:
         return A, Q
 
     def _norm(self, f: np.ndarray) -> float:
+        # Eq. 9
         return integrate.simpson(f * np.sqrt(self.cenergy), x=self.cenergy)
 
         # return np.sum(f * np.sqrt(self.cenergy) * self.denergy)
@@ -629,8 +641,19 @@ class BoltzmannSolver:
     def _scharf_gummel(self,
                        sigma_tilde: np.ndarray,
                        G: Union[float, np.ndarray] = 0.0) -> spmatrix:
+        """ Eq. 45
+
+        Args:
+            sigma_tilde (np.ndarray): _description_
+            G (Union[float, np.ndarray], optional): _description_. Defaults to 0.0.
+
+        Returns:
+            spmatrix: _description_
+        """
+        # Eq. 41
         D = self.DA / (sigma_tilde) + self.DB
 
+        # Here, `z` is the Peclet number (Eq. 45).
         # Due to the zero flux b.c. the values of z[0] and z[-1] are never used.
         # To make sure, we set is a nan so it will taint everything if ever
         # used.
@@ -643,12 +666,12 @@ class BoltzmannSolver:
 
         diags = np.zeros((3, self.n))
 
-        # No flux at the energy = 0 boundary
+        # No flux in energy space at zero energy
         diags[0, 0] = a0[1]
 
-        diags[0, 1:] = a0[2:] - a1[1:-1]
-        diags[1, :] = a1[:-1]
-        diags[2, :] = -a0[1:]
+        diags[0, 1:] = a0[2:] - a1[1:-1]  # F0,i
+        diags[1, :] = a1[:-1]  # F0,i+1
+        diags[2, :] = -a0[1:]  # F0,i-1
 
         # F[n+1] = 2 * F[n] + F[n-1] b.c.
         # diags[2, -2] -= a1[-1]
@@ -661,13 +684,21 @@ class BoltzmannSolver:
         diags[2, -2] = -a0[-2]
         diags[0, -1] = -a1[-2]
 
-        diags[0, :] += G
+        diags[0, :] += G  # TODO: find explication for this
 
         A = sparse.dia_matrix((diags, [0, 1, -1]), shape=(self.n, self.n))
 
         return A
 
     def _g(self, F0: np.ndarray) -> np.ndarray:
+        """ Eq. 51
+
+        Args:
+            F0 (np.ndarray): _description_
+
+        Returns:
+            np.ndarray: _description_
+        """
         Fp = np.r_[F0[0], F0, F0[-1]]
         cenergyp = np.r_[self.cenergy[0], self.cenergy, self.cenergy[-1]]
         g = np.log(Fp[2:] / Fp[:-2]) / (cenergyp[2:] - cenergyp[:-2])
@@ -678,20 +709,32 @@ class BoltzmannSolver:
             F0: np.ndarray,
             reactions: Optional[Iterator[Tuple[Target, Process]]] = None
             ) -> spmatrix:
+        """ Eq. 46
+
+        Args:
+            F0 (np.ndarray): _description_
+            reactions (Optional[Iterator[Tuple[Target, Process]]], optional): _description_. Defaults to None.
+
+        Returns:
+            spmatrix: _description_
+        """
         PQ = sparse.csr_matrix((self.n, self.n))
 
-        g = self._g(F0)
+        g = self._g(F0)  # Eq. 51
+
         if reactions is None:
-            # reactions = list(self.iter_inelastic())
+            # In Eq. 47 & Eq. 48, sums are defined over inelastic reactions
             reactions = self.iter_inelastic()
 
         data = []
         rows = []
         cols = []
         for t, p in reactions:
+            # Eq. 47 & Eq. 48
             r = t.density * GAMMA * p.scatterings(g, self.cenergy)
             in_factor = p.in_factor
 
+            # Extend list with 2 values: 1st for Qij, 2nd for Pi
             data.extend([in_factor * r, -r])
             rows.extend([p.i, p.j])
             cols.extend([p.j, p.j])

@@ -56,7 +56,8 @@ class Target:
         if process.product is None and process.kind != 'EFFECTIVE' and process.kind != 'ELASTIC':
             raise ValueError(
                 f"Attribute `product` has not been set for process `{process}`")
-        self.by_product[process.product].append(process)
+        if process.product is not None:
+            self.by_product[process.product].append(process)
 
         logging.debug(f"Process{str(process)} added to target {str(self)}")
 
