@@ -27,7 +27,7 @@ def main():
     bsolver.target['O2'].density = 1.0  # molar fraction, -
     bsolver.kT = T * co.k / co.eV  # Gas temperature, eV
     E = 1e5  # Electric field, V
-    bsolver.EN = E / ND  # * solver.TOWNSEND  # Reduced electric field, Td
+    bsolver.EN = E / ND  # * solver.TOWNSEND  # Reduced electric field, in V.m^2
     bsolver.init()
 
     # Start with Maxwell EEDF as initial guess.  Here we are starting with
@@ -44,8 +44,9 @@ def main():
     # print("electron temperature = %.3f K" % bsolver.electron_temperature(f1))
 
     plt.plot(bsolver.cenergy, f0, label="f0")
-    plt.plot(bsolver.cenergy, f1, label="f0")
+    plt.plot(bsolver.cenergy, f1, label="f1")
     plt.legend()
+    plt.grid()
     plt.show()
 
 

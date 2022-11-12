@@ -17,7 +17,7 @@ the Boltzmann equation for E/n = 120 Td and a gas temperature of
 import logging
 import argparse
 
-import pylab
+import matplotlib.pyplot as plt
 import scipy.constants as co
 from bolos import parser, solver, grid
 
@@ -61,11 +61,12 @@ def main():
     with open(args.input, "r", encoding="utf-8") as fp:
         bsolver.load_collisions(parser.parse(fp))
 
-    # Set the conditions.  And initialize the solver
+    # Set the conditions.  
     bsolver.target['N2'].density = 0.8
     bsolver.target['O2'].density = 0.2
     bsolver.kT = args.temp * co.k / co.eV
     bsolver.EN = args.en * solver.TOWNSEND
+    # And initialize the solver.
     bsolver.init()
 
     # Start with Maxwell EEDF as initial guess.  Here we are starting with
@@ -100,8 +101,8 @@ def main():
     print(f"diffusion * N  = {bsolver.diffusion(f1)} 1/m/s")
     print(f"average energy = {bsolver.mean_energy(f1)} eV")
 
-    pylab.plot(bsolver.grid.c, f1)
-    pylab.show()
+    plt.plot(bsolver.grid.c, f1)
+    plt.show()
 
 
 if __name__ == '__main__':
