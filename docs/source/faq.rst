@@ -49,9 +49,7 @@ highly optimized, C or FORTRAN code.
 What version(s) of Python does BOLOS support?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Presently, only 2.7.  In future release, Python 3+ will be supported.
-Since BOLOS is a pure Python package, the transition should be 
-straightforward.
+Presently, 3.10+. 
 
 
 

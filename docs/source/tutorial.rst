@@ -52,7 +52,7 @@ Usually you only need to import these three packages:
 
 Now you can define an energy grid where you want to evaluate the electron 
 energies.  The :module:`grid` contains a few classes to do this.  The simplest
-one defines a linear grid.  Let's create a grid extending from 0 to 20 eV with 
+one defines a linear grid.  Let's create a grid extending from 0 to 60 eV with 
 200 cells: ::
 
   gr = grid.LinearGrid(0, 60., 200)
